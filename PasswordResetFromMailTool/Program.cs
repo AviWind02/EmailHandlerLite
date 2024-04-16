@@ -17,7 +17,7 @@ namespace PasswordResetFromMailTool
     internal class Program
     {
         static string[] Scopes = { GmailService.Scope.GmailReadonly, GmailService.Scope.GmailSend, GmailService.Scope.MailGoogleCom };
-        static string ApplicationName = "Gmail API .NET Quickstart";
+        static string ApplicationName = "Gmail API .NET EmailHandle";
 
         static async Task Main(string[] args)
         {
@@ -53,7 +53,7 @@ namespace PasswordResetFromMailTool
             try
             {
                 DateTime dateFrom = DateTime.UtcNow.AddMinutes(-30);
-                string query = $"is:unread from:{}";
+                string query = $"is:unread from:{new LocalFile().filterEmail}";
 
                 Console.WriteLine("Checking for new emails...");
                 var request = service.Users.Messages.List("me");
@@ -68,17 +68,17 @@ namespace PasswordResetFromMailTool
                     {
                         var emailPool = new EmailPool();
                         bool shouldProcess = emailPool.CheckAndAddEmailIdAsync(messageItem.Id);
-                        if (shouldProcess)
+                        if (shouldProcess)//Password Reset Removed - since this is public
                         {
                             var message = await service.Users.Messages.Get("me", messageItem.Id).ExecuteAsync();
                             var emailBody = await GetMessageBody(service, message.Id);
                             var username = ExtractUsername(emailBody);
                             var emailDetails = await GetEmailDetails(service, message.Id);
 
-                            Console.WriteLine($"{{Email: {messageItem.Id}, Username: {username}}}"); // EmailBody Add Funtion is to Reset PW
-                            Console.WriteLine($"To: {emailDetails.To} | From: {emailDetails.From}");//Debug Line for checking email From and To
+                            Console.WriteLine($"{{Email: {messageItem.Id}, Username: {username}}}"); // Email Body 
+                            Console.WriteLine($"To: {emailDetails.To} | From: {emailDetails.From}");// Debug Line for checking email From and To
 
-                            await SendEmail(service, emailDetails.From, "Password Reset Received", "This is a test email from C# via Gmail API.");//Send Email After Reset
+                            await SendEmail(service, emailDetails.From, "Password Reset Received", "This is a test email from C# via Gmail API.");// Send Email After Reset
                         }
                         else
                         {
@@ -101,38 +101,51 @@ namespace PasswordResetFromMailTool
 
         static async Task<string> GetMessageBody(GmailService service, string messageId)
         {
-            // Create a request to get the message with the specified format
-            var request = service.Users.Messages.Get("me", messageId);
-            request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full;  // Set the format to Full here
-
-            var message = await request.ExecuteAsync();
-            if (message.Payload?.Parts == null && message.Payload?.Body != null)
+            try
             {
-                return DecodeBase64String(message.Payload.Body.Data);
-            }
+                // Create a request to get the message with the specified format
+                var request = service.Users.Messages.Get("me", messageId);
+                request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full;  // Set the format to Full here
+                var message = await request.ExecuteAsync();
+                Console.WriteLine("Message fetched successfully.");
 
-            if (message.Payload?.Parts != null)
-            {
-                foreach (var part in message.Payload.Parts)
+                if (message.Payload?.Parts == null && message.Payload?.Body != null)
                 {
-                    if (part.MimeType == "text/plain")
+                    Console.WriteLine("Processing single-part message.");
+                    return DecodeBase64String(message.Payload.Body.Data);
+                }
+
+                if (message.Payload?.Parts != null)
+                {
+                    foreach (var part in message.Payload.Parts)
                     {
-                        return DecodeBase64String(part.Body.Data);
-                    }
-                    else if (part.Parts != null)
-                    {
-                        foreach (var subpart in part.Parts)
+                        if (part.MimeType == "text/plain")
                         {
-                            if (subpart.MimeType == "text/plain")
+                            Console.WriteLine("Found 'text/plain' MIME type in main parts.");
+                            return DecodeBase64String(part.Body.Data);
+                        }
+                        else if (part.Parts != null)
+                        {
+                            foreach (var subpart in part.Parts)
                             {
-                                return DecodeBase64String(subpart.Body.Data);
+                                if (subpart.MimeType == "text/plain")
+                                {
+                                    Console.WriteLine("Found 'text/plain' MIME type in nested parts.");
+                                    return DecodeBase64String(subpart.Body.Data);
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            return null; // Return null if no suitable part is found
+                Console.WriteLine("No suitable text/plain part found in the message.");
+                return null; // Return null if no suitable part is found
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to retrieve or decode the message body: {ex.Message}");
+                return null; 
+            }
         }
 
         static string ExtractUsername(string emailBody)
@@ -207,42 +220,57 @@ namespace PasswordResetFromMailTool
         }
 
 
+
         static async Task<(string Body, string To, string From)> GetEmailDetails(GmailService service, string messageId)
         {
-            var request = service.Users.Messages.Get("me", messageId);
-            request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full; // Fetch the full message data
-            var message = await request.ExecuteAsync();
-
             string body = "";
             string to = "";
             string from = "";
 
-            if (message.Payload.Parts == null && message.Payload.Body != null)
+            try
             {
-                body = DecodeBase64String(message.Payload.Body.Data);
-            }
-            else if (message.Payload.Parts != null)
-            {
-                foreach (var part in message.Payload.Parts)
+                var request = service.Users.Messages.Get("me", messageId);
+                request.Format = UsersResource.MessagesResource.GetRequest.FormatEnum.Full; // Fetch the full message data
+                var message = await request.ExecuteAsync();
+
+                Console.WriteLine("Email fetched successfully.");
+
+                if (message.Payload.Parts == null && message.Payload.Body != null)
                 {
-                    if (part.MimeType == "text/plain")
+                    body = DecodeBase64String(message.Payload.Body.Data);
+                    Console.WriteLine("Single-part email body decoded.");
+                }
+                else if (message.Payload.Parts != null)
+                {
+                    foreach (var part in message.Payload.Parts)
                     {
-                        body = DecodeBase64String(part.Body.Data);
+                        if (part.MimeType == "text/plain")
+                        {
+                            body = DecodeBase64String(part.Body.Data);
+                            Console.WriteLine("Multi-part email body decoded.");
+                            break; // Stop after finding the first text/plain part
+                        }
+                    }
+                }
+
+                // Retrieve headers for To and From
+                foreach (var header in message.Payload.Headers)
+                {
+                    if (header.Name == "To")
+                    {
+                        to = header.Value;
+                        Console.WriteLine("Recipient address retrieved.");
+                    }
+                    else if (header.Name == "From")
+                    {
+                        from = header.Value;
+                        Console.WriteLine("Sender address retrieved.");
                     }
                 }
             }
-
-            // Retrieve headers for To and From
-            foreach (var header in message.Payload.Headers)
+            catch (Exception ex)
             {
-                if (header.Name == "To")
-                {
-                    to = header.Value;
-                }
-                else if (header.Name == "From")
-                {
-                    from = header.Value;
-                }
+                Console.WriteLine($"Error fetching or processing email: {ex.Message}");
             }
 
             return (Body: body, To: to, From: from);
