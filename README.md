@@ -25,3 +25,10 @@ These instructions will get you a copy of the project up and running on your loc
    ```bash
    git clone https://github.com/yourusername/EmailHandlerLite.git
    cd EmailHandlerLite
+
+### License
+- This project is licensed under the MIT License - see the LICENSE.md file for details.
+
+### Contributing
+Welcome to contributions from the community. 
+
